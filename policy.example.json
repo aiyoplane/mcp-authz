@@ -1,0 +1,45 @@
+{
+  "$schema_note": "This is a deliberately simple example policy for the reference RDP demo. Production Aiyo policies compose evidence signals, approval workflows, budget checks, and more — evaluated against merchant-owned policy inside the hosted RDP. See aiyoplane.com for details.",
+  "merchant_id": "demo-merchant",
+  "default_effect": "deny",
+  "rules": [
+    {
+      "id": "allow-deploy-staging",
+      "description": "Staging deploys are freely allowed in the demo.",
+      "match": {
+        "action_type": "deploy",
+        "target": "staging"
+      },
+      "effect": "allow"
+    },
+    {
+      "id": "deny-deploy-production",
+      "description": "Production deploys are denied by this demo policy. In real Aiyo, this is where you would require an approval evidence signal, a change-window check, or an on-call attestation before authorizing.",
+      "match": {
+        "action_type": "deploy",
+        "target": "production"
+      },
+      "effect": "deny",
+      "reason": "Production deploys require an approval evidence signal. Configure your merchant policy to require human-approval or change-window evidence before authorizing this action."
+    },
+    {
+      "id": "allow-small-payment",
+      "description": "Payments up to $50.00 (5000 cents) are allowed.",
+      "match": {
+        "action_type": "payment"
+      },
+      "amount_max": 5000,
+      "effect": "allow"
+    },
+    {
+      "id": "deny-large-payment",
+      "description": "Payments above $50.00 exceed the demo threshold. In real Aiyo, this is where a settlement-verification evidence signal or a step-up approval workflow would be evaluated.",
+      "match": {
+        "action_type": "payment"
+      },
+      "amount_min": 5001,
+      "effect": "deny",
+      "reason": "Amount exceeds demo policy threshold of $50.00. In production, this is where an escalation policy or settlement-verification evidence signal would be evaluated."
+    }
+  ]
+}

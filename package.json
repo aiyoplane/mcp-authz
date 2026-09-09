@@ -1,0 +1,47 @@
+{
+  "name": "@aiyoplane/mcp-authz",
+  "version": "0.1.0",
+  "description": "Reference middleware for composing Aiyo — the Economic Execution Authorization plane for autonomous systems — above an MCP server. Verify First. Execute Second.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "demo": "cd examples/mcp-server-basic && npm install --silent && npm start",
+    "lint": "echo 'Add your linter here.'"
+  },
+  "keywords": [
+    "aiyo",
+    "mcp",
+    "model-context-protocol",
+    "authorization",
+    "execution-authorization",
+    "runtime-decision-point",
+    "middleware",
+    "agent-authorization"
+  ],
+  "author": "Aiyo Corporation",
+  "license": "Apache-2.0",
+  "homepage": "https://aiyoplane.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aiyoplane/mcp-authz.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aiyoplane/mcp-authz/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "docs/",
+    "policy.example.json",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md"
+  ]
+}

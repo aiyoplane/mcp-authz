@@ -1,0 +1,12 @@
+{
+  "name": "aiyo-mcp-authz-example-basic",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@aiyoplane/mcp-authz": "file:../.."
+  }
+}
