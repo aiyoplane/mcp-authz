@@ -1,6 +1,6 @@
 # @aiyoplane/mcp-authz
 
-**Reference middleware for composing Aiyo — the Economic Execution Authorization plane for autonomous systems — above an MCP server. Verify First. Execute Second. Learn more at [aiyoplane.com](https://aiyoplane.com).**
+**Reference middleware for composing Aiyo — the settlement-verified Economic Execution Authorization plane for autonomous systems — above an MCP server. Verify First. Execute Second. Learn more at [aiyoplane.com](https://aiyoplane.com).**
 
 ---
 
