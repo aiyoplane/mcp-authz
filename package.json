@@ -1,7 +1,7 @@
 {
   "name": "@aiyoplane/mcp-authz",
-  "version": "0.1.0",
-  "description": "Reference middleware for composing Aiyo — the Economic Execution Authorization plane for autonomous systems — above an MCP server. Verify First. Execute Second.",
+  "version": "1.1.0",
+  "description": "AEAP Composition Boundary reference implementation for MCP servers. Attaches the Runtime Decision Point above an MCP tool-invocation boundary. Node sibling of aiyoplane-mcp-authz on PyPI.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -14,20 +14,28 @@
   },
   "keywords": [
     "aiyo",
+    "aiyoplane",
+    "aeap",
     "mcp",
     "model-context-protocol",
     "authorization",
-    "execution-authorization",
     "runtime-decision-point",
-    "middleware",
-    "agent-authorization"
+    "rdp",
+    "execution-receipt",
+    "composition-boundary",
+    "agent-authorization",
+    "settlement-verified"
   ],
-  "author": "Aiyo Corporation",
+  "author": {
+    "name": "Aiyoplane, Inc.",
+    "email": "info@aiyoplane.com",
+    "url": "https://aiyoplane.com"
+  },
   "license": "Apache-2.0",
   "homepage": "https://aiyoplane.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aiyoplane/mcp-authz.git"
+    "url": "git+https://github.com/aiyoplane/mcp-authz.git"
   },
   "bugs": {
     "url": "https://github.com/aiyoplane/mcp-authz/issues"
@@ -37,7 +45,7 @@
   },
   "files": [
     "src/",
-    "docs/",
+    "docs/ARCHITECTURE.md",
     "policy.example.json",
     "README.md",
     "LICENSE",

@@ -19,18 +19,21 @@
  *
  * @param {object} intent - The intent payload (as produced by buildIntentPayload).
  * @param {object} policy - The policy object (from policy.example.json or similar).
- * @returns {{ effect: 'allow' | 'deny', rule_id: string, reason?: string }}
+ * @returns {{ effect: 'allow' | 'escalate' | 'deny', rule_id: string, reason?: string, escalation_id?: string }}
  */
 export function evaluatePolicy(intent, policy) {
   const rules = Array.isArray(policy && policy.rules) ? policy.rules : [];
-  const defaultEffect = policy && policy.default_effect === 'allow' ? 'allow' : 'deny';
+  // `default_effect` must be one of allow/escalate/deny; anything else collapses
+  // to deny per the fail-closed invariant (AEAP §2.2 invariant 5).
+  const defaultEffect = normalizeEffect(policy && policy.default_effect, 'deny');
 
   for (const rule of rules) {
     if (matchesRule(intent, rule)) {
       return {
-        effect: rule.effect === 'allow' ? 'allow' : 'deny',
+        effect: normalizeEffect(rule.effect, 'deny'),
         rule_id: rule.id || '__unnamed_rule__',
         reason: rule.reason,
+        escalation_id: rule.escalation_id,
       };
     }
   }
@@ -43,6 +46,16 @@ export function evaluatePolicy(intent, policy) {
         ? 'No policy rule matched this intent; default effect is deny (fail-closed).'
         : undefined,
   };
+}
+
+// Normalize a free-form effect string into the canonical ternary.
+// Anything outside allow/escalate/deny collapses to the given fallback — the
+// fail-closed default is deny.
+function normalizeEffect(effect, fallback) {
+  if (effect === 'allow' || effect === 'escalate' || effect === 'deny') {
+    return effect;
+  }
+  return fallback;
 }
 
 function matchesRule(intent, rule) {

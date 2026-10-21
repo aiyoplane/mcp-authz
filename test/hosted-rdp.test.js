@@ -206,6 +206,11 @@ test('verifyReceipt() validates v1 tokens against the configured hmacKey', async
   const payload = await rdp.verifyReceipt(token);
   assert.strictEqual(payload.iid, 'intent-uuid');
 
-  const tampered = token.slice(0, -1) + '0';
+  // Deterministic tamper: flip the last hex digit to a character guaranteed
+  // to differ from the original. A naive `slice(0, -1) + '0'` is a 1-in-16
+  // flake because the signature's own last hex char has a 1/16 chance of
+  // already being '0'.
+  const lastHex = token.slice(-1);
+  const tampered = token.slice(0, -1) + (lastHex === '0' ? '1' : '0');
   await assert.rejects(rdp.verifyReceipt(tampered), AiyoReceiptInvalid);
 });

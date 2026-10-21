@@ -8,3 +8,9 @@ dist/
 build/
 .vscode/
 .idea/
+
+# npm pack output — regenerated per release, not versioned.
+*.tgz
+
+# Internal process documents — never committed
+docs/_internal/

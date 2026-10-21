@@ -32,7 +32,22 @@
 // or hosted.
 
 import { buildIntentPayload } from './intent-builder.js';
-import { AiyoDenied, AiyoUnreachable, AiyoConfigError } from './errors.js';
+import { AiyoDenied, AiyoEscalation, AiyoUnreachable, AiyoConfigError } from './errors.js';
+
+// Node's single-timer maximum (2^31 - 1 milliseconds, ~24.8 days). Delays
+// greater than this are silently clamped to 1ms by node:timers, which would
+// convert a long-timeout configuration into an immediate-fire bug. We validate
+// against this ceiling in the config check below.
+const TIMEOUT_MAX = 2147483647;
+
+// Test-only hook. Set to an object with { setTimeout, clearTimeout } to
+// substitute instrumented timers (for leak-cleanup assertions in the test
+// suite). Production code must not touch this; it exists solely so the
+// test file can verify clearTimeout is called on the resolve path.
+export const _internals = {
+  setTimeout: globalThis.setTimeout.bind(globalThis),
+  clearTimeout: globalThis.clearTimeout.bind(globalThis),
+};
 
 /**
  * @typedef {object} RdpProvider
@@ -48,6 +63,10 @@ import { AiyoDenied, AiyoUnreachable, AiyoConfigError } from './errors.js';
  * @property {(toolName: string, args: object, ctx: object, toolDef: object) => object} [intentBuilder] - Custom intent-payload builder.
  * @property {object} [logger] - Logger with .info and .error (default: console).
  * @property {boolean} [verifyReceiptOnAllow] - Verify the receipt locally after ALLOW (default: true).
+ * @property {number} [authorizationTimeoutMs] - If set to a positive finite number,
+ *   bound rdp.evaluate() with this timeout. On fire, the wrapped handler throws
+ *   AiyoUnreachable with code 'TIMEOUT' and the gated handler never runs (fail-
+ *   closed per AEAP §2.2 invariant 5). Omitted or <= 0 → no timeout applied.
  */
 
 /**
@@ -62,7 +81,28 @@ export function createAiyoMcpAuthz(config) {
     intentBuilder = buildIntentPayload,
     logger = console,
     verifyReceiptOnAllow = true,
+    authorizationTimeoutMs = 0,
   } = config;
+
+  // Validate authorizationTimeoutMs: 0 or omitted means "no timeout applied";
+  // anything else must be a positive finite integer no greater than Node's
+  // supported single-timer maximum. Delays above TIMEOUT_MAX (2^31 - 1 ms,
+  // ~24.8 days) are not supported by node:timers — Node clamps them to 1ms
+  // and emits a warning, which would silently convert a long-timeout
+  // configuration into an immediate-fire bug. Reject at construction instead.
+  if (authorizationTimeoutMs !== 0) {
+    if (
+      !Number.isFinite(authorizationTimeoutMs) ||
+      authorizationTimeoutMs < 0 ||
+      authorizationTimeoutMs > TIMEOUT_MAX
+    ) {
+      throw new AiyoConfigError(
+        `createAiyoMcpAuthz: authorizationTimeoutMs must be a non-negative finite number ` +
+        `no greater than ${TIMEOUT_MAX} ms (Node's single-timer maximum). ` +
+        `Omit or set 0 to disable; set a positive millisecond value to enable.`
+      );
+    }
+  }
 
   /**
    * Wrap an MCP tool handler with an Aiyo authorization decision.
@@ -97,16 +137,67 @@ export function createAiyoMcpAuthz(config) {
       // 2. Evaluate through the RDP.
       //    ALLOW resolves with { intentId, receipt }.
       //    DENY throws AiyoDenied (propagates directly to the caller).
+      //    ESCALATE throws AiyoEscalation (propagates directly; the
+      //      Composition Boundary MUST hold execution per AEAP §6.2).
+      //    Timeout (if authorizationTimeoutMs is set) throws AiyoUnreachable
+      //      with code 'TIMEOUT' — fail-closed per AEAP §2.2 invariant 5.
       //    Any other failure becomes AiyoUnreachable — fail closed.
       let evaluation;
       try {
-        evaluation = await rdp.evaluate(intentPayload);
+        evaluation = await evaluateWithTimeout(rdp, intentPayload, authorizationTimeoutMs);
       } catch (err) {
+        // Typed-error path: pass through directly.
         if (err instanceof AiyoDenied) throw err;
+        if (err instanceof AiyoEscalation) throw err;
+
+        // Wire-format translation: an RDP provider that throws a plain Error
+        // carrying an AEAP verdict code is signaling a Policy decision in
+        // the AEAP wire-format shape. Promote to the matching typed error
+        // so downstream catches work uniformly whether the RDP returns the
+        // typed class or the wire format.
+        //
+        // Both `code` and `verdict` are accepted (different RDP conventions
+        // use one or the other). When BOTH are present on the same error
+        // they MUST agree; a contradictory decision representation is an
+        // ambiguous signal and we fail closed rather than silently resolving
+        // it by field order.
+        if (err) {
+          const wireVerdict = classifyWireVerdict(err);
+          if (wireVerdict === 'AMBIGUOUS') {
+            // Contradictory code/verdict → fail closed. Handler never runs.
+            logger.error('[aiyo-mcp-authz] RDP returned ambiguous decision shape', {
+              toolName,
+              code: err.code,
+              verdict: err.verdict,
+            });
+            throw new AiyoUnreachable(
+              `RDP returned a decision whose code and verdict disagree ` +
+              `(code=${JSON.stringify(err.code)}, verdict=${JSON.stringify(err.verdict)}). ` +
+              `Fail-closed per AEAP §2.2 invariant 5.`,
+              err
+            );
+          }
+          if (wireVerdict === 'BLOCK') {
+            const reason = err.reason || err.message || 'Policy denied this intent';
+            throw new AiyoDenied(reason, err.rule_id || null, err.intentId || null);
+          }
+          if (wireVerdict === 'ESCALATE') {
+            const reason = err.reason || err.message || 'Policy escalated this intent pending resolution';
+            throw new AiyoEscalation(
+              reason,
+              err.rule_id || null,
+              err.intentId || null,
+              err.escalationId || err.escalation_id || null
+            );
+          }
+        }
+
         logger.error('[aiyo-mcp-authz] RDP evaluate() failed', {
           toolName,
           error: err && err.message,
+          code: err && err.code,
         });
+        if (err instanceof AiyoUnreachable) throw err;
         throw new AiyoUnreachable('RDP evaluate() failed', err);
       }
 
@@ -182,6 +273,94 @@ export function createAiyoMcpAuthz(config) {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Classify an RDP-thrown error against the AEAP wire-format verdict shape.
+ *
+ * Returns one of:
+ *   - 'BLOCK'      — err carries a BLOCK verdict (via code, verdict, or both,
+ *                    and if both, they agree).
+ *   - 'ESCALATE'   — err carries an ESCALATE verdict under the same rule.
+ *   - 'AMBIGUOUS'  — err carries BOTH fields but they disagree. The decision
+ *                    representation is malformed; fail closed.
+ *   - 'NONE'       — err carries neither a BLOCK nor an ESCALATE signal.
+ *
+ * This classifier intentionally ignores the `ALLOW` wire-value: ALLOW is
+ * not represented by a thrown error — a successful evaluate returns the
+ * ALLOW shape. An error with `code: 'ALLOW'` is a programmer bug on the
+ * RDP side; it falls to 'NONE' here and is wrapped as AiyoUnreachable.
+ */
+function classifyWireVerdict(err) {
+  const code = err && err.code;
+  const verdict = err && err.verdict;
+
+  const codeIsBlock = code === 'BLOCK';
+  const codeIsEscalate = code === 'ESCALATE';
+  const verdictIsBlock = verdict === 'BLOCK';
+  const verdictIsEscalate = verdict === 'ESCALATE';
+
+  const hasCodeSignal = codeIsBlock || codeIsEscalate;
+  const hasVerdictSignal = verdictIsBlock || verdictIsEscalate;
+
+  // Contradiction detection: both fields present and pointing at different
+  // verdicts. We require agreement when both are set.
+  if (hasCodeSignal && hasVerdictSignal) {
+    if (codeIsBlock !== verdictIsBlock) return 'AMBIGUOUS';
+    if (codeIsEscalate !== verdictIsEscalate) return 'AMBIGUOUS';
+  }
+
+  if (codeIsBlock || verdictIsBlock) return 'BLOCK';
+  if (codeIsEscalate || verdictIsEscalate) return 'ESCALATE';
+  return 'NONE';
+}
+
+
+/**
+ * Run rdp.evaluate(intent) bounded by authorizationTimeoutMs. On fire, throws
+ * AiyoUnreachable with code 'TIMEOUT'. If timeoutMs is 0 or omitted, forwards
+ * directly with no timeout applied.
+ *
+ * Scope and limitations:
+ *   - This function bounds the WAIT for the authorization decision from the
+ *     caller's perspective. On fire, the caller receives a rejection and the
+ *     gated handler never runs.
+ *   - This function does NOT cancel the underlying rdp.evaluate() work.
+ *     JavaScript Promises are not cancellable. If evaluate eventually
+ *     resolves, its result is discarded by Promise.race. For a metered or
+ *     side-effectful RDP implementation, timeout fires do not abort the
+ *     downstream work; they only bound what the caller observes.
+ *   - The timer is NOT `.unref()`ed. If a caller is awaiting wrap() and the
+ *     timer is the only remaining event-loop handle capable of settling the
+ *     awaited Promise, we need Node to stay alive until the timer fires;
+ *     otherwise the process would exit silently without delivering the
+ *     rejection the caller is waiting on. The clearTimeout in the finally
+ *     block ensures the timer does not outlive a resolved evaluation.
+ *   - The fail-closed invariant (AEAP §2.2 invariant 5) is upheld: no path
+ *     through this function returns an ALLOW shape when the timeout fires.
+ */
+async function evaluateWithTimeout(rdp, intentPayload, timeoutMs) {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return rdp.evaluate(intentPayload);
+  }
+
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = _internals.setTimeout(() => {
+      const err = new AiyoUnreachable(
+        `RDP evaluate() exceeded authorizationTimeoutMs=${timeoutMs}`,
+        null
+      );
+      err.code = 'TIMEOUT';
+      reject(err);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([rdp.evaluate(intentPayload), timeoutPromise]);
+  } finally {
+    _internals.clearTimeout(timeoutHandle);
+  }
+}
 
 function validateConfig(cfg) {
   if (!cfg || typeof cfg !== 'object') {

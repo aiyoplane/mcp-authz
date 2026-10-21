@@ -3,7 +3,25 @@
 All notable changes to `@aiyoplane/mcp-authz` are recorded here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This package is at `v0.x` (preview); the public API may change through the `v0.x` line and locks at `v1.0`.
+
+## [1.1.0] — 2026-10-20
+
+Additive release. No change to receipt format, canonicalization, signing, verification, or any existing API shape. 1.0.0 code is source- and binary-compatible.
+
+### Added
+- **`AiyoEscalation` error class.** First-class ESCALATE verdict (AEAP §6.2), distinct from `AiyoDenied`. Fields: `name: 'AiyoEscalation'`, `code: 'ESCALATE'`, `reason`, `rule_id`, `intentId`, `escalationId`. Message prefix `"ESCALATE: "` preserves backward-compat with downstream `/escalat/i` message-text matching.
+- **`authorizationTimeoutMs` config option on `createAiyoMcpAuthz`.** Positive integer up to Node's `TIMEOUT_MAX` (2 147 483 647 ms). Values outside this range — negative, `NaN`, `Infinity`, or above `TIMEOUT_MAX` — throw `AiyoConfigError` at construction. Omitted or `0` → no timeout applied (1.0.0 behavior preserved). **Production consumers that need a bounded wait on `rdp.evaluate()` must set a finite value explicitly.** On fire, the wrapped handler rejects with `AiyoUnreachable { code: 'TIMEOUT' }`; the gated handler never runs. The timeout bounds the caller's wait; it does not cancel the underlying `rdp.evaluate()` work (JS Promises are not cancellable).
+- **`escalate` as a valid rule effect in `evaluatePolicy`.** `createLocalRdp` surfaces ESCALATE as an `AiyoEscalation` throw. All three canonical AEAP verdicts (`allow`/`escalate`/`deny`) are accepted as `default_effect` values; non-canonical rule effects fail closed to `deny`.
+- **AEAP wire-format error translation.** RDPs that throw a plain `Error` with `code: 'BLOCK'` or `verdict: 'BLOCK'` (or ESCALATE equivalents) are promoted to the matching typed error. If `code` and `verdict` are both present and **disagree**, the decision representation is treated as ambiguous: `AiyoUnreachable` is raised and the gated handler never runs — fail closed per AEAP §2.2 invariant 5.
+
+### Fail-closed invariant
+No new path permits the gated handler to run: timeout fire, `AiyoEscalation` throw, ambiguous wire-format decision, and `TIMEOUT_MAX` boundary rejection are all fail-closed. The behavioral suite in `test/escalation-and-timeout.test.js` asserts these directly against the shipped middleware source.
+
+### Changed
+- `test/pattern-41-conformance.test.js` adapter factory exercises native `authorizationTimeoutMs` and native typed-error promotion; the previous harness-side timeout wrapper is removed.
+
+### Not changed
+No change to receipt format, canonicalization, signing, verification, `exp` handling, JWKS surface, the Pattern 41 ordering invariant, or the Pattern 42 args-reference-identity properties.
 
 ## [0.1.0] — Preview release
 

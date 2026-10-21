@@ -29,9 +29,11 @@
 //   * buildIntentPayload(toolName, args, ctx, toolDef) → intent object
 //       Default intent-payload builder. Pass your own via config.intentBuilder.
 //
-//   * AiyoDenied, AiyoUnreachable, AiyoReceiptInvalid, AiyoConfigError
+//   * AiyoDenied, AiyoEscalation, AiyoUnreachable, AiyoReceiptInvalid, AiyoConfigError
 //       Typed errors. Catch these in your MCP tool handler to surface useful
-//       protocol errors back to the calling agent.
+//       protocol errors back to the calling agent. AiyoEscalation represents
+//       an ESCALATE verdict (AEAP §6.2) — the Composition Boundary MUST hold
+//       execution pending out-of-band resolution rather than proceed.
 //
 // See docs/ARCHITECTURE.md for the composition pattern.
 
@@ -43,6 +45,7 @@ export { buildIntentPayload } from './intent-builder.js';
 export { evaluatePolicy } from './policy.js';
 export {
   AiyoDenied,
+  AiyoEscalation,
   AiyoUnreachable,
   AiyoReceiptInvalid,
   AiyoConfigError,

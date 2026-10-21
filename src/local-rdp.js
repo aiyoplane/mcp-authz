@@ -29,7 +29,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { evaluatePolicy } from './policy.js';
 import { verifyReceipt as verifyReceiptFn } from './verify-receipt.js';
-import { AiyoDenied, AiyoConfigError } from './errors.js';
+import { AiyoDenied, AiyoEscalation, AiyoConfigError } from './errors.js';
 
 const DEFAULT_TTL_SECONDS = 300; // 5 minutes — matches production Aiyo default.
 const DEFAULT_CLOCK_SKEW = 30;
@@ -74,6 +74,8 @@ export function createLocalRdp(opts = {}) {
    * @param {object} intentPayload - Shape produced by buildIntentPayload.
    * @returns {Promise<{ intentId: string, receipt: object, decision: object }>}
    * @throws {AiyoDenied} when the policy returns deny.
+   * @throws {AiyoEscalation} when the policy returns escalate; the Composition
+   *                          Boundary MUST hold execution pending resolution.
    */
   async function evaluate(intentPayload) {
     const decision = evaluatePolicy(intentPayload, policy);
@@ -84,6 +86,15 @@ export function createLocalRdp(opts = {}) {
         decision.reason || 'Local RDP policy denied this intent',
         decision.rule_id,
         intentId
+      );
+    }
+
+    if (decision.effect === 'escalate') {
+      throw new AiyoEscalation(
+        decision.reason || 'Local RDP policy escalated this intent pending resolution',
+        decision.rule_id,
+        intentId,
+        decision.escalation_id
       );
     }
 
